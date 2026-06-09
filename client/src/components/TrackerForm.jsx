@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Leaf, Info, RefreshCw, AlertCircle, CheckCircle, Car, Zap, Utensils, ShoppingBag } from 'lucide-react';
+import { Leaf, Info, AlertCircle, CheckCircle, Car, Zap, Utensils, ShoppingBag } from 'lucide-react';
 
-// Client-side emission factors for real-time preview (matching backend values)
 const PREVIEW_FACTORS = {
   transport: {
     petrol_car: 0.18,
@@ -24,11 +23,11 @@ const PREVIEW_FACTORS = {
     furniture: 50.0,
     general: 5.0
   },
-  electricity: 0.5 // per kWh
+  electricity: 0.5
 };
 
-export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) {
-  const [category, setCategory] = useState('transport'); // 'transport' | 'electricity' | 'food' | 'purchase'
+export default function TrackerForm({ onAddLog, onNavigate }) {
+  const [category, setCategory] = useState('transport');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   
   // Category specific states
@@ -46,8 +45,6 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
   // Real-time Preview Carbon Score
   const [estimatedCo2, setEstimatedCo2] = useState(0);
   
-  // Submit state
-  const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -80,7 +77,7 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
     setEstimatedCo2(parseFloat(co2.toFixed(2)));
   }, [category, transportType, distance, electricityKwh, foodType, foodMeals, purchaseType, purchaseQty]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -122,48 +119,26 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
       details = { itemCategory: purchaseType, quantity: qty };
     }
 
-    setSubmitting(true);
+    // Add entry locally
+    onAddLog({
+      category,
+      date,
+      co2Emissions: estimatedCo2,
+      details
+    });
 
-    try {
-      const res = await fetch(`${API_BASE}/logs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          category,
-          date,
-          details
-        })
-      });
+    setSuccessMsg('Activity logged successfully!');
+    
+    // Reset inputs
+    setDistance('');
+    setElectricityKwh('');
+    setFoodMeals('1');
+    setPurchaseQty('1');
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to submit log entry.');
-
-      setSuccessMsg('Activity logged successfully!');
-      
-      // Reset inputs
-      setDistance('');
-      setElectricityKwh('');
-      setFoodMeals('1');
-      setPurchaseQty('1');
-
-      // Trigger animations and notify app level of new stats/badges
-      if (onSuccess) {
-        onSuccess(data.streak, data.unlockedBadges);
-      }
-
-      // Automatically navigate back to dashboard after 1.5 seconds
-      setTimeout(() => {
-        onNavigate('dashboard');
-      }, 1500);
-
-    } catch (err) {
-      setErrorMsg(err.message);
-    } finally {
-      setSubmitting(false);
-    }
+    // Automatically navigate back to dashboard after 1.5 seconds
+    setTimeout(() => {
+      onNavigate('dashboard');
+    }, 1500);
   };
 
   return (
@@ -176,7 +151,7 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
         Record your choices today to calculate your carbon impact and unlock achievements.
       </p>
 
-      {/* Tabs Menu (Accessibility: Navigation landmarks role="tablist") */}
+      {/* Tabs Menu */}
       <div className="tab-container" role="tablist" aria-label="Carbon categories">
         {[
           { id: 'transport', label: 'Transit', icon: <Car size={16} /> },
@@ -233,8 +208,6 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
         </div>
 
         {/* Tab Panels */}
-        
-        {/* Transportation Panel */}
         {category === 'transport' && (
           <div id="panel-transport" role="tabpanel" aria-labelledby="tab-transport" className="animate-fade-in">
             <div className="form-group">
@@ -272,7 +245,6 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
           </div>
         )}
 
-        {/* Electricity Panel */}
         {category === 'electricity' && (
           <div id="panel-electricity" role="tabpanel" aria-labelledby="tab-electricity" className="animate-fade-in">
             <div className="form-group">
@@ -296,7 +268,6 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
           </div>
         )}
 
-        {/* Food Panel */}
         {category === 'food' && (
           <div id="panel-food" role="tabpanel" aria-labelledby="tab-food" className="animate-fade-in">
             <div className="form-group">
@@ -330,7 +301,6 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
           </div>
         )}
 
-        {/* Purchases Panel */}
         {category === 'purchase' && (
           <div id="panel-purchase" role="tabpanel" aria-labelledby="tab-purchase" className="animate-fade-in">
             <div className="form-group">
@@ -364,7 +334,7 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
           </div>
         )}
 
-        {/* Real-time estimator preview box */}
+        {/* Real-time preview */}
         <div className="co2-preview-box">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Leaf size={18} style={{ color: 'hsl(var(--accent-emerald))' }} />
@@ -387,21 +357,14 @@ export default function TrackerForm({ token, API_BASE, onSuccess, onNavigate }) 
             type="submit" 
             className="btn btn-primary" 
             style={{ flex: 1 }}
-            disabled={submitting}
           >
-            {submitting ? (
-              <>
-                <RefreshCw size={16} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
-                Saving...
-              </>
-            ) : 'Submit Log Entry'}
+            Submit Log Entry
           </button>
           
           <button 
             type="button" 
             className="btn btn-secondary" 
             onClick={() => onNavigate('dashboard')}
-            disabled={submitting}
           >
             Cancel
           </button>

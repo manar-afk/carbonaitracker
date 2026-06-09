@@ -1,98 +1,75 @@
 import React, { useState, useEffect } from 'react';
-import { Sliders, Leaf, ShieldAlert, Award, Save, RefreshCw, AlertCircle } from 'lucide-react';
+import { Sliders, Leaf, Save, AlertCircle } from 'lucide-react';
 
-export default function Simulator({ token, API_BASE, onActionSave }) {
-  // Simulator Parameters
-  const [elecPercent, setElecPercent] = useState(0); // 0 - 50%
-  const [transitKm, setTransitKm] = useState(0);    // 0 - 200 km
-  const [dietSwaps, setDietSwaps] = useState(0);    // 0 - 21 meals
+export default function Simulator({ logs, simulation, onSave }) {
+  // Simulator Parameters (Sliders)
+  const [elecPercent, setElecPercent] = useState(0);
+  const [transitKm, setTransitKm] = useState(0);
+  const [dietSwaps, setDietSwaps] = useState(0);
 
-  const [dryLaundry, setDryLaundry] = useState(false); // saves 2kg/week
-  const [unplugVampire, setUnplugVampire] = useState(false); // saves 1.5kg/week
-  const [ledBulbs, setLedBulbs] = useState(false); // saves 3kg/week
+  // Checkboxes
+  const [dryLaundry, setDryLaundry] = useState(false);
+  const [unplugVampire, setUnplugVampire] = useState(false);
+  const [ledBulbs, setLedBulbs] = useState(false);
 
-  const [targetReduction, setTargetReduction] = useState(15); // 5 - 50%
+  const [targetReduction, setTargetReduction] = useState(15);
   const [plannedActions, setPlannedActions] = useState([]);
 
-  // Calculated values
-  const [currentFootprint, setCurrentFootprint] = useState(85.0); // Baseline default weekly (kg CO2)
+  // Calculated variables
+  const [currentFootprint, setCurrentFootprint] = useState(85.0); // baseline
   const [projectedSavings, setProjectedSavings] = useState(0);
   const [projectedFootprint, setProjectedFootprint] = useState(85.0);
   const [goalMet, setGoalMet] = useState(false);
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Fetch current stats and simulation targets
+  // Calculate baseline weekly footprint from logs
   useEffect(() => {
-    const fetchSimulationData = async () => {
-      try {
-        // Get user dashboard data to establish an actual baseline weekly footprint
-        const dashRes = await fetch(`${API_BASE}/dashboard`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!dashRes.ok) throw new Error('Failed to load dashboard data');
-        const dashData = await dashRes.json();
-        
-        // Use weekly total if they have logged activities, otherwise default to a national average (e.g., 85 kg)
-        const weeklyEmissions = dashData.stats?.weekly?.total > 5 ? dashData.stats.weekly.total : 85.0;
-        setCurrentFootprint(weeklyEmissions);
+    const now = new Date();
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
-        // Get saved simulation settings
-        const simRes = await fetch(`${API_BASE}/simulation`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!simRes.ok) throw new Error('Failed to load simulation settings');
-        const simData = await simRes.json();
-        
-        setTargetReduction(simData.targetReductionPercentage || 15);
-        setPlannedActions(simData.plannedActions || []);
-        
-        // Pre-populate sliders if actions exist
-        const actions = simData.plannedActions || [];
-        if (actions.some(a => a.includes('electricity') || a.includes('Power'))) setElecPercent(15);
-        if (actions.some(a => a.includes('transit') || a.includes('commute'))) setTransitKm(40);
-        if (actions.some(a => a.includes('vegetarian') || a.includes('diet') || a.includes('meat'))) setDietSwaps(5);
-        
-        if (actions.includes('Line dry laundry')) setDryLaundry(true);
-        if (actions.includes('Unplug vampire electronics')) setUnplugVampire(true);
-        if (actions.includes('Upgrade to LED bulbs')) setLedBulbs(true);
+    // Sum logs from the past week
+    const weeklyLogs = logs.filter(l => new Date(l.date) >= oneWeekAgo);
+    const weeklyTotal = weeklyLogs.reduce((a, b) => a + b.co2Emissions, 0);
 
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
+    // Default to 85 kg (national average) if they have no logs logged
+    setCurrentFootprint(weeklyTotal > 5 ? parseFloat(weeklyTotal.toFixed(1)) : 85.0);
 
-    fetchSimulationData();
-  }, [token]);
+    // Set active targets
+    setTargetReduction(simulation.targetReductionPercentage || 15);
+    
+    // Set active state variables from saved actions
+    const actions = simulation.plannedActions || [];
+    if (actions.some(a => a.includes('electricity') || a.includes('Power'))) setElecPercent(15);
+    if (actions.some(a => a.includes('transit') || a.includes('commute'))) setTransitKm(40);
+    if (actions.some(a => a.includes('vegetarian') || a.includes('diet') || a.includes('meat'))) setDietSwaps(5);
+    
+    if (actions.includes('Line dry laundry')) setDryLaundry(true);
+    if (actions.includes('Unplug vampire electronics')) setUnplugVampire(true);
+    if (actions.includes('Upgrade to LED bulbs')) setLedBulbs(true);
+  }, [logs.length, simulation.updatedAt]); // Sync if logs or target changes
 
   // Recalculate savings in real-time
   useEffect(() => {
     let savings = 0;
     const actionsList = [];
 
-    // 1. Electricity calculation
-    // Average weekly household electricity is ~40 kg.
+    // 1. Electricity (40kg average baseline)
     if (elecPercent > 0) {
       const elecSavings = 40 * (elecPercent / 100);
       savings += elecSavings;
       actionsList.push(`Reduce household electricity by ${elecPercent}%`);
     }
 
-    // 2. Transit commute swap
-    // Replacing petrol car (0.18 kg/km) with train (0.04 kg/km) saves 0.14 kg CO2 per km.
+    // 2. Transit swap (saves 0.14 kg CO2 per km)
     if (transitKm > 0) {
       const transitSavings = transitKm * 0.14;
       savings += transitSavings;
       actionsList.push(`Swap ${transitKm} km of driving with public transport`);
     }
 
-    // 3. Diet swaps (meat -> vegetarian)
-    // Swapping average meat meal (2.0 kg) for vegetarian (0.8 kg) saves 1.2 kg per meal.
+    // 3. Diet swaps (saves 1.2 kg per meal)
     if (dietSwaps > 0) {
       const dietSavings = dietSwaps * 1.2;
       savings += dietSavings;
@@ -113,8 +90,9 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
       actionsList.push('Upgrade to LED bulbs');
     }
 
-    // Include other adopted AI Advisor tips that were saved in database previously
-    plannedActions.forEach(action => {
+    // Include other adopted advice actions
+    const prevActions = simulation.plannedActions || [];
+    prevActions.forEach(action => {
       if (!actionsList.includes(action) && 
           !action.startsWith('Reduce household electricity') &&
           !action.startsWith('Swap') &&
@@ -123,8 +101,7 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
           action !== 'Unplug vampire electronics' &&
           action !== 'Upgrade to LED bulbs') {
         actionsList.push(action);
-        // Add nominal savings for imported tips
-        savings += 5.0; 
+        savings += 5.0; // average nominal savings
       }
     });
 
@@ -135,54 +112,26 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
     setProjectedFootprint(projected);
     setPlannedActions(actionsList);
 
-    // Check if target met
     const percentSaved = currentFootprint > 0 ? (finalSavings / currentFootprint) * 100 : 0;
     setGoalMet(percentSaved >= targetReduction);
 
-  }, [elecPercent, transitKm, dietSwaps, dryLaundry, unplugVampire, ledBulbs, currentFootprint, targetReduction]);
+  }, [elecPercent, transitKm, dietSwaps, dryLaundry, unplugVampire, ledBulbs, currentFootprint, targetReduction, simulation.plannedActions]);
 
-  const handleSavePlan = async () => {
-    setSaving(true);
-    setError('');
+  const handleSavePlan = () => {
     setSuccessMsg('');
-    try {
-      const res = await fetch(`${API_BASE}/simulation`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          targetReductionPercentage: targetReduction,
-          plannedActions,
-          estimatedSavings: projectedSavings
-        })
-      });
+    onSave({
+      targetReductionPercentage: targetReduction,
+      plannedActions,
+      estimatedSavings: projectedSavings,
+      updatedAt: new Date().toISOString()
+    });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save simulator plan.');
-
-      setSuccessMsg('Your carbon reduction plan has been saved!');
-      
-      // Trigger achievements/confetti
-      if (onActionSave && data.unlockedBadges) {
-        onActionSave(data.unlockedBadges);
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
+    setSuccessMsg('Your carbon reduction plan has been saved locally!');
+    
+    setTimeout(() => {
+      setSuccessMsg('');
+    }, 4000);
   };
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px', flexDirection: 'column', gap: '16px' }}>
-        <RefreshCw size={36} className="animate-spin" style={{ color: 'hsl(var(--accent-emerald))', animation: 'spin 1s linear infinite' }} />
-        <p style={{ color: 'hsl(var(--text-secondary))' }}>Loading simulation engine...</p>
-      </div>
-    );
-  }
 
   // Bar Chart calculations
   const maxBar = Math.max(currentFootprint, projectedFootprint, 10);
@@ -210,22 +159,14 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
         </div>
       )}
 
-      {error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'hsl(var(--accent-coral))', background: 'hsla(var(--accent-coral), 0.1)', padding: '12px', borderRadius: 'var(--border-radius-sm)', fontSize: '0.9rem', border: '1px solid hsla(var(--accent-coral), 0.2)' }}>
-          <AlertCircle size={18} />
-          {error}
-        </div>
-      )}
-
       <div className="grid-dashboard">
         
-        {/* Left Columns: Simulator Controls */}
+        {/* Left Side: Sliders */}
         <div className="glass-card col-8" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h3 style={{ fontSize: '1.2rem', fontWeight: '800', borderBottom: '1px solid hsl(var(--border-color))', paddingBottom: '12px' }}>
             Simulate Actions
           </h3>
 
-          {/* Slider 1: Electricity */}
           <div className="slider-container">
             <div className="slider-label-row">
               <label className="form-label" htmlFor="elec-slider">Reduce Home Electricity</label>
@@ -245,7 +186,6 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
             <span style={{ fontSize: '0.75rem', color: 'hsl(var(--text-muted))' }}>Saves on cooling, heating, and appliances.</span>
           </div>
 
-          {/* Slider 2: Transit Commute */}
           <div className="slider-container">
             <div className="slider-label-row">
               <label className="form-label" htmlFor="transit-slider">Commute swap (Driving &rarr; Train/Bus)</label>
@@ -265,7 +205,6 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
             <span style={{ fontSize: '0.75rem', color: 'hsl(var(--text-muted))' }}>Replaces carbon-heavy car trips with train or bus travel.</span>
           </div>
 
-          {/* Slider 3: Diet Swaps */}
           <div className="slider-container">
             <div className="slider-label-row">
               <label className="form-label" htmlFor="diet-slider">Meatless Swaps (Meat &rarr; Veg/Vegan)</label>
@@ -285,7 +224,6 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
             <span style={{ fontSize: '0.75rem', color: 'hsl(var(--text-muted))' }}>Swaps carbon-intensive meat dishes for healthy plant-based meals.</span>
           </div>
 
-          {/* Checklist options */}
           <div style={{ marginTop: '10px' }}>
             <h4 style={{ fontSize: '0.95rem', fontWeight: '700', marginBottom: '12px', color: 'hsl(var(--text-secondary))' }}>
               Household Efficiency Tweaks
@@ -306,7 +244,7 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
                   id={`chk-${chk.id}`}
                   className="checkbox-input" 
                   checked={chk.val}
-                  onChange={() => {}} // handled by row click
+                  onChange={() => {}}
                 />
                 <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label htmlFor={`chk-${chk.id}`} style={{ cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500' }}>{chk.label}</label>
@@ -317,13 +255,12 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
           </div>
         </div>
 
-        {/* Right Columns: Projections & SVG Charts */}
+        {/* Right Side: Chart */}
         <div className="glass-card col-4" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h3 style={{ fontSize: '1.2rem', fontWeight: '800', borderBottom: '1px solid hsl(var(--border-color))', paddingBottom: '12px' }}>
             Projections & Target
           </h3>
 
-          {/* Goal Selector */}
           <div className="form-group">
             <label className="form-label" htmlFor="target-reduction">Weekly Target Reduction</label>
             <select 
@@ -341,44 +278,18 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
             </select>
           </div>
 
-          {/* Real-time comparison SVG Chart */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '10px 0' }}>
             <svg width="220" height={chartHeight + 30} style={{ overflow: 'visible' }}>
-              {/* Baseline Bar */}
-              <rect 
-                x="30" 
-                y={chartHeight - currentBarHeight} 
-                width="50" 
-                height={currentBarHeight} 
-                fill="hsl(var(--accent-coral))" 
-                rx="6"
-              />
-              <text x="55" y={chartHeight - currentBarHeight - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">
-                {currentFootprint}kg
-              </text>
-              <text x="55" y={chartHeight + 16} textAnchor="middle" fill="hsl(var(--text-muted))" fontSize="10" fontWeight="600">
-                Current
-              </text>
+              <rect x="30" y={chartHeight - currentBarHeight} width="50" height={currentBarHeight} fill="hsl(var(--accent-coral))" rx="6" />
+              <text x="55" y={chartHeight - currentBarHeight - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">{currentFootprint}kg</text>
+              <text x="55" y={chartHeight + 16} textAnchor="middle" fill="hsl(var(--text-muted))" fontSize="10" fontWeight="600">Current</text>
 
-              {/* Projected Bar */}
-              <rect 
-                x="140" 
-                y={chartHeight - projectedBarHeight} 
-                width="50" 
-                height={projectedBarHeight} 
-                fill="hsl(var(--accent-emerald))" 
-                rx="6"
-              />
-              <text x="165" y={chartHeight - projectedBarHeight - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">
-                {projectedFootprint}kg
-              </text>
-              <text x="165" y={chartHeight + 16} textAnchor="middle" fill="hsl(var(--text-muted))" fontSize="10" fontWeight="600">
-                Projected
-              </text>
+              <rect x="140" y={chartHeight - projectedBarHeight} width="50" height={projectedBarHeight} fill="hsl(var(--accent-emerald))" rx="6" />
+              <text x="165" y={chartHeight - projectedBarHeight - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">{projectedFootprint}kg</text>
+              <text x="165" y={chartHeight + 16} textAnchor="middle" fill="hsl(var(--text-muted))" fontSize="10" fontWeight="600">Projected</text>
             </svg>
           </div>
 
-          {/* Goal evaluation box */}
           <div style={{
             background: goalMet ? 'hsla(var(--accent-emerald), 0.1)' : 'hsla(var(--accent-gold), 0.1)',
             border: `1px solid ${goalMet ? 'hsla(var(--accent-emerald), 0.3)' : 'hsla(var(--accent-gold), 0.3)'}`,
@@ -408,19 +319,8 @@ export default function Simulator({ token, API_BASE, onActionSave }) {
             className="btn btn-primary" 
             style={{ width: '100%', gap: '8px', marginTop: '10px' }} 
             onClick={handleSavePlan}
-            disabled={saving}
           >
-            {saving ? (
-              <>
-                <RefreshCw size={16} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
-                Saving Plan...
-              </>
-            ) : (
-              <>
-                <Save size={16} />
-                Save Reduction Plan
-              </>
-            )}
+            Save Reduction Plan
           </button>
         </div>
 

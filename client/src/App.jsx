@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Leaf, LogOut, Sun, Moon, Award, Calendar, Compass, PlusCircle, LayoutDashboard, Sliders } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Leaf, Sun, Moon, Award, Calendar, Compass, PlusCircle, LayoutDashboard, Sliders, Edit3, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 import Dashboard from './components/Dashboard';
@@ -8,146 +8,63 @@ import AIAdvisor from './components/AIAdvisor';
 import Simulator from './components/Simulator';
 import Achievements from './components/Achievements';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = '/api'; // Statically served endpoint relative to host
 
 export default function App() {
-  const [token, setToken] = useState(localStorage.getItem('token') || '');
-  const [user, setUser] = useState(JSON.parse(localStorage.getItem('user') || 'null'));
+  // Application state (fully backed by LocalStorage)
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('user');
+    return saved ? JSON.parse(saved) : { name: 'Eco Explorer', streak: 0, lastActiveDate: null, badges: [] };
+  });
+
+  const [logs, setLogs] = useState(() => {
+    const saved = localStorage.getItem('logs');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [simulation, setSimulation] = useState(() => {
+    const saved = localStorage.getItem('simulation');
+    return saved ? JSON.parse(saved) : { targetReductionPercentage: 15, plannedActions: [], estimatedSavings: 0 };
+  });
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
-  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   
-  // Auth Form Inputs
-  const [authName, setAuthName] = useState('');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  
-  // Confetti Badge Notification
+  // Custom Profile Editing
+  const [editingName, setEditingName] = useState(false);
+  const [tempName, setTempName] = useState(user.name);
+
+  // Confetti Badge Toast Notification
   const [unlockedBadgeNotify, setUnlockedBadgeNotify] = useState(null);
 
-  const googleBtnRef = useRef(null);
+  // Sync state to LocalStorage
+  useEffect(() => {
+    localStorage.setItem('user', JSON.stringify(user));
+  }, [user]);
 
-  // Sync theme to document body
+  useEffect(() => {
+    localStorage.setItem('logs', JSON.stringify(logs));
+  }, [logs]);
+
+  useEffect(() => {
+    localStorage.setItem('simulation', JSON.stringify(simulation));
+  }, [simulation]);
+
+  // Sync theme
   useEffect(() => {
     document.body.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Google Sign-In Script Hook
-  useEffect(() => {
-    if (token) return; // Only init Google Auth when logged out
-
-    const clientID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-    
-    const initGoogleAuth = () => {
-      if (window.google && clientID) {
-        window.google.accounts.id.initialize({
-          client_id: clientID,
-          callback: handleGoogleCredentialResponse,
-        });
-        
-        if (googleBtnRef.current) {
-          window.google.accounts.id.renderButton(googleBtnRef.current, {
-            theme: theme === 'dark' ? 'filled_blue' : 'outline',
-            size: 'large',
-            width: '320',
-          });
-        }
-      }
-    };
-
-    // Small delay to ensure script has executed
-    const timer = setTimeout(() => {
-      initGoogleAuth();
-    }, 800);
-
-    return () => clearTimeout(timer);
-  }, [token, theme, authMode]);
-
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  const saveAuth = (token, user) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    setToken(token);
-    setUser(user);
-    setAuthError('');
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken('');
-    setUser(null);
-    setActiveTab('dashboard');
-  };
-
-  // Process standard forms
-  const handleAuthSubmit = async (e) => {
+  const handleNameChangeSubmit = (e) => {
     e.preventDefault();
-    setAuthError('');
-    
-    const endpoint = authMode === 'register' ? '/auth/register' : '/auth/login';
-    const body = authMode === 'register' 
-      ? { name: authName, email: authEmail, password: authPassword }
-      : { email: authEmail, password: authPassword };
-
-    try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Authentication failed');
-      
-      saveAuth(data.token, data.user);
-    } catch (err) {
-      setAuthError(err.message);
-    }
-  };
-
-  // Google Sign-In Callback
-  const handleGoogleCredentialResponse = async (response) => {
-    try {
-      const res = await fetch(`${API_BASE}/auth/google`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential })
-      });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Google Login failed');
-      
-      saveAuth(data.token, data.user);
-    } catch (err) {
-      setAuthError(err.message);
-    }
-  };
-
-  // Developer Bypass Login helper
-  const handleDevBypass = async () => {
-    const devEmail = 'dev.eco.explorer@carbonai.local';
-    const devName = 'Eco Explorer';
-    const devBypassToken = `dev_bypass_token_${Date.now()}_${devEmail}_${devName}`;
-    
-    try {
-      const res = await fetch(`${API_BASE}/auth/google`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: devBypassToken })
-      });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Developer Bypass failed');
-      
-      saveAuth(data.token, data.user);
-    } catch (err) {
-      setAuthError(err.message);
+    if (tempName.trim()) {
+      setUser(prev => ({ ...prev, name: tempName.trim() }));
+      setEditingName(false);
     }
   };
 
@@ -167,158 +84,152 @@ export default function App() {
       }
 
       const particleCount = 50 * (timeLeft / duration);
-      // since particles fall down, animate a bit higher than random
       confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
       confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
     }, 250);
   };
 
-  // Called when other components unlock a badge
-  const processUnlockedBadges = (badges) => {
-    if (badges && badges.length > 0) {
-      // Find badge info
-      const latest = badges[0]; // notify first one
-      
-      // Update user state badges
-      const updatedUser = { ...user, badges: [...(user.badges || []), ...badges.map(b => b.id)] };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
+  // Badge unlock checker
+  const checkAndAwardBadges = (updatedUser, updatedLogs, updatedSimulation) => {
+    const earned = new Set(updatedUser.badges);
+    const newBadges = [];
 
-      setUnlockedBadgeNotify(latest);
+    // Badge list definitions
+    const badgeMap = {
+      first_step: { id: 'first_step', name: 'First Step', description: 'Log your first carbon tracking activity' },
+      streak_starter: { id: 'streak_starter', name: 'Streak Starter', description: 'Maintain a 3-day tracking streak' },
+      eco_warrior: { id: 'eco_warrior', name: 'Eco Warrior', description: 'Maintain a 7-day tracking streak' },
+      low_carbon_cook: { id: 'low_carbon_cook', name: 'Low Carbon Cook', description: 'Log 3 vegan or vegetarian meals' },
+      commute_hero: { id: 'commute_hero', name: 'Commute Hero', description: 'Log 5 public transport trips' },
+      power_saver: { id: 'power_saver', name: 'Power Saver', description: 'Log electricity and plan a 15%+ carbon reduction' },
+      carbon_master: { id: 'carbon_master', name: 'Carbon Master', description: 'Log 10 activities and plan a 20%+ carbon reduction' }
+    };
+
+    // 1. First Step
+    if (!earned.has('first_step') && updatedLogs.length >= 1) {
+      newBadges.push(badgeMap.first_step);
+    }
+
+    // 2. Streaks
+    if (!earned.has('streak_starter') && updatedUser.streak >= 3) {
+      newBadges.push(badgeMap.streak_starter);
+    }
+    if (!earned.has('eco_warrior') && updatedUser.streak >= 7) {
+      newBadges.push(badgeMap.eco_warrior);
+    }
+
+    // 3. Low Carbon Cook
+    if (!earned.has('low_carbon_cook')) {
+      const veggieCount = updatedLogs.filter(l => 
+        l.category === 'food' && 
+        (l.details?.mealType === 'vegan' || l.details?.mealType === 'vegetarian')
+      ).length;
+      if (veggieCount >= 3) {
+        newBadges.push(badgeMap.low_carbon_cook);
+      }
+    }
+
+    // 4. Commute Hero
+    if (!earned.has('commute_hero')) {
+      const transitCount = updatedLogs.filter(l => 
+        l.category === 'transport' && 
+        (l.details?.fuelType === 'bus' || l.details?.fuelType === 'train')
+      ).length;
+      if (transitCount >= 5) {
+        newBadges.push(badgeMap.commute_hero);
+      }
+    }
+
+    // 5. Power Saver
+    if (!earned.has('power_saver')) {
+      const hasElec = updatedLogs.some(l => l.category === 'electricity');
+      if (hasElec && updatedSimulation.targetReductionPercentage >= 15) {
+        newBadges.push(badgeMap.power_saver);
+      }
+    }
+
+    // 6. Carbon Master
+    if (!earned.has('carbon_master')) {
+      if (updatedLogs.length >= 10 && updatedSimulation.targetReductionPercentage >= 20) {
+        newBadges.push(badgeMap.carbon_master);
+      }
+    }
+
+    if (newBadges.length > 0) {
+      const allBadges = [...updatedUser.badges, ...newBadges.map(b => b.id)];
+      setUser(prev => ({ ...prev, badges: allBadges }));
+      
+      // Notify the latest badge earned
+      setUnlockedBadgeNotify(newBadges[0]);
       triggerConfetti();
       
-      // Clear after 6 seconds
       setTimeout(() => {
         setUnlockedBadgeNotify(null);
       }, 6000);
     }
   };
 
-  const handleUpdateStreakAndBadges = (newStreak, unlockedBadges) => {
-    if (newStreak !== user.streak || (unlockedBadges && unlockedBadges.length > 0)) {
-      const updatedUser = { 
-        ...user, 
-        streak: newStreak, 
-        badges: unlockedBadges && unlockedBadges.length > 0 
-          ? [...new Set([...(user.badges || []), ...unlockedBadges.map(b => b.id)])]
-          : user.badges
-      };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
-      
-      if (unlockedBadges && unlockedBadges.length > 0) {
-        processUnlockedBadges(unlockedBadges);
+  // Add Log Entry
+  const handleAddLog = (newLog) => {
+    const logItem = {
+      id: Math.random().toString(36).substring(2, 11),
+      ...newLog,
+      createdAt: new Date().toISOString()
+    };
+    
+    const nextLogs = [logItem, ...logs];
+    setLogs(nextLogs);
+
+    // Calculate Streak
+    const todayStr = new Date().toISOString().split('T')[0];
+    let newStreak = user.streak;
+    let lastActive = user.lastActiveDate;
+
+    if (!lastActive) {
+      newStreak = 1;
+      lastActive = todayStr;
+    } else if (lastActive === todayStr) {
+      // Already logged today, streak stays same
+    } else {
+      const lastDate = new Date(lastActive);
+      const todayDate = new Date(todayStr);
+      const diffTime = Math.abs(todayDate - lastDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays === 1) {
+        newStreak += 1;
+      } else if (diffDays > 1) {
+        newStreak = 1; // broke, reset to 1
       }
+      lastActive = todayStr;
     }
+
+    const nextUser = {
+      ...user,
+      streak: newStreak,
+      lastActiveDate: lastActive
+    };
+
+    setUser(nextUser);
+    
+    // Check achievements
+    checkAndAwardBadges(nextUser, nextLogs, simulation);
   };
 
-  if (!token) {
-    return (
-      <div className="app-container">
-        <header className="glass-nav">
-          <div className="nav-wrapper">
-            <div className="logo-container">
-              <Leaf size={22} style={{ color: 'hsl(var(--accent-emerald))' }} />
-              <span>CarbonAItracker</span>
-            </div>
-            <button className="btn btn-secondary btn-icon-only" onClick={toggleTheme}>
-              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-          </div>
-        </header>
+  // Delete Log Entry
+  const handleDeleteLog = (id) => {
+    const nextLogs = logs.filter(l => l.id !== id);
+    setLogs(nextLogs);
+  };
 
-        <main className="main-content auth-wrapper">
-          <div className="glass-card auth-card animate-fade-in">
-            <div className="auth-header">
-              <div className="auth-logo">CarbonAItracker</div>
-              <p style={{ color: 'hsl(var(--text-secondary))', fontSize: '0.9rem' }}>
-                {authMode === 'login' 
-                  ? 'Sign in to monitor and reduce your daily carbon footprint.' 
-                  : 'Join the community and start tracking your carbon emissions.'}
-              </p>
-            </div>
-
-            {authError && (
-              <div style={{ color: 'hsl(var(--accent-coral))', background: 'hsla(var(--accent-coral), 0.1)', padding: '12px', borderRadius: 'var(--border-radius-sm)', marginBottom: '16px', fontSize: '0.9rem', border: '1px solid hsla(var(--accent-coral), 0.2)' }}>
-                {authError}
-              </div>
-            )}
-
-            <form onSubmit={handleAuthSubmit}>
-              {authMode === 'register' && (
-                <div className="form-group">
-                  <label className="form-label">Name</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="Enter your name" 
-                    value={authName}
-                    onChange={e => setAuthName(e.target.value)}
-                    required
-                  />
-                </div>
-              )}
-
-              <div className="form-group">
-                <label className="form-label">Email Address</label>
-                <input 
-                  type="email" 
-                  className="form-input" 
-                  placeholder="name@example.com" 
-                  value={authEmail}
-                  onChange={e => setAuthEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '24px' }}>
-                <label className="form-label">Password</label>
-                <input 
-                  type="password" 
-                  className="form-input" 
-                  placeholder="••••••••" 
-                  value={authPassword}
-                  onChange={e => setAuthPassword(e.target.value)}
-                  required
-                />
-              </div>
-
-              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-                {authMode === 'login' ? 'Sign In' : 'Create Account'}
-              </button>
-            </form>
-
-            <div className="auth-divider">or authenticate with</div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-              {import.meta.env.VITE_GOOGLE_CLIENT_ID ? (
-                <div ref={googleBtnRef} className="google-btn-wrapper"></div>
-              ) : (
-                <div style={{ textAlign: 'center', width: '100%' }}>
-                  <p style={{ fontSize: '0.8rem', color: 'hsl(var(--text-muted))', marginBottom: '8px' }}>Google Auth client ID not configured.</p>
-                </div>
-              )}
-              
-              <button className="btn btn-secondary" style={{ width: '100%', gap: '8px' }} onClick={handleDevBypass}>
-                <Leaf size={16} style={{ color: 'hsl(var(--accent-emerald))' }} />
-                Bypass Auth (Dev Mode)
-              </button>
-            </div>
-
-            <p style={{ marginTop: '24px', textAlign: 'center', fontSize: '0.9rem', color: 'hsl(var(--text-secondary))' }}>
-              {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
-              <span 
-                style={{ color: 'hsl(var(--accent-emerald))', cursor: 'pointer', fontWeight: '600' }}
-                onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }}
-              >
-                {authMode === 'login' ? 'Sign Up' : 'Log In'}
-              </span>
-            </p>
-          </div>
-        </main>
-      </div>
-    );
-  }
+  // Update Simulation settings
+  const handleSaveSimulation = (simData) => {
+    const nextSim = { ...simulation, ...simData };
+    setSimulation(nextSim);
+    
+    // Re-check achievements (like Power Saver or Carbon Master)
+    checkAndAwardBadges(user, logs, nextSim);
+  };
 
   return (
     <div className="app-container">
@@ -360,6 +271,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Navigation Header */}
       <header className="glass-nav">
         <div className="nav-wrapper">
           <div className="logo-container" onClick={() => setActiveTab('dashboard')}>
@@ -367,7 +279,7 @@ export default function App() {
             <span>CarbonAItracker</span>
           </div>
           
-          <nav className="nav-links">
+          <nav className="nav-links" aria-label="Main Navigation">
             <span className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <LayoutDashboard size={16} />
@@ -401,43 +313,74 @@ export default function App() {
           </nav>
 
           <div className="nav-actions">
-            <button className="btn btn-secondary btn-icon-only" onClick={toggleTheme}>
+            <button className="btn btn-secondary btn-icon-only" onClick={toggleTheme} aria-label="Toggle dark/light theme">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid hsl(var(--border-color))', paddingLeft: '12px' }}>
-              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>{user?.name}</span>
-                <span style={{ fontSize: '0.7rem', color: 'hsl(var(--text-muted))' }}>🔥 {user?.streak} Day Streak</span>
-              </div>
-              <button className="btn btn-danger btn-icon-only" onClick={handleLogout} title="Sign Out">
-                <LogOut size={16} />
-              </button>
+              {editingName ? (
+                <form onSubmit={handleNameChangeSubmit} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={tempName}
+                    onChange={e => setTempName(e.target.value)}
+                    style={{ padding: '4px 8px', fontSize: '0.8rem', maxWidth: '100px' }}
+                    required
+                    autoFocus
+                  />
+                  <button type="submit" className="btn btn-primary btn-icon-only" style={{ width: '24px', height: '24px' }}>
+                    <Check size={12} />
+                  </button>
+                </form>
+              ) : (
+                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    {user.name}
+                    <Edit3 size={12} style={{ cursor: 'pointer', opacity: 0.6 }} onClick={() => { setTempName(user.name); setEditingName(true); }} />
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: 'hsl(var(--text-muted))' }}>🔥 {user.streak} Day Streak</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </header>
 
-      {/* Main viewport */}
+      {/* Main Viewport */}
       <main className="main-content">
         {activeTab === 'dashboard' && (
-          <Dashboard token={token} API_BASE={API_BASE} onNavigate={setActiveTab} />
+          <Dashboard 
+            user={user} 
+            logs={logs} 
+            simulation={simulation} 
+            onDeleteLog={handleDeleteLog} 
+            onNavigate={setActiveTab} 
+          />
         )}
         {activeTab === 'track' && (
           <TrackerForm 
-            token={token} 
-            API_BASE={API_BASE} 
-            onSuccess={handleUpdateStreakAndBadges}
-            onNavigate={setActiveTab}
+            onAddLog={handleAddLog} 
+            onNavigate={setActiveTab} 
           />
         )}
         {activeTab === 'advisor' && (
-          <AIAdvisor token={token} API_BASE={API_BASE} onAddAction={processUnlockedBadges} />
+          <AIAdvisor 
+            user={user} 
+            logs={logs} 
+            simulation={simulation} 
+            API_BASE={API_BASE} 
+            onAdopt={handleSaveSimulation} 
+          />
         )}
         {activeTab === 'simulator' && (
-          <Simulator token={token} API_BASE={API_BASE} onActionSave={processUnlockedBadges} />
+          <Simulator 
+            logs={logs} 
+            simulation={simulation} 
+            onSave={handleSaveSimulation} 
+          />
         )}
         {activeTab === 'achievements' && (
-          <Achievements token={token} API_BASE={API_BASE} />
+          <Achievements user={user} />
         )}
       </main>
     </div>

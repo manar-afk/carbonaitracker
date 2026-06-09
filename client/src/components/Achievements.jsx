@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Award, ShieldAlert, Sparkles, Footprints, Flame, Utensils, Train, Zap, ShieldCheck } from 'lucide-react';
+import React from 'react';
+import { Award, Footprints, Flame, Sparkles, Utensils, Train, Zap, ShieldCheck } from 'lucide-react';
 
 const ALL_BADGES = [
   {
@@ -53,48 +53,8 @@ const ALL_BADGES = [
   }
 ];
 
-export default function Achievements({ token, API_BASE }) {
-  const [unlockedIds, setUnlockedIds] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const fetchUserBadges = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/dashboard`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!res.ok) throw new Error('Failed to retrieve achievements cabinet.');
-        const data = await res.json();
-        setUnlockedIds(data.user?.badges || []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUserBadges();
-  }, [token]);
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px', flexDirection: 'column' }}>
-        <p style={{ color: 'hsl(var(--text-secondary))' }}>Opening achievements cabinet...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="glass-card" style={{ border: '1px solid hsla(var(--accent-coral), 0.3)', background: 'hsla(var(--accent-coral), 0.05)', textAlign: 'center', padding: '40px 20px' }}>
-        <ShieldAlert size={48} style={{ color: 'hsl(var(--accent-coral))', marginBottom: '16px' }} />
-        <h3>Failed to load Achievements</h3>
-        <p style={{ color: 'hsl(var(--text-secondary))' }}>{error}</p>
-      </div>
-    );
-  }
-
+export default function Achievements({ user }) {
+  const unlockedIds = user.badges || [];
   const unlockedCount = ALL_BADGES.filter(b => unlockedIds.includes(b.id)).length;
 
   return (

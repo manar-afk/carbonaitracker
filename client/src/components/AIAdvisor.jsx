@@ -1,20 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Check, Compass, Car, Zap, Utensils, ShoppingBag, Loader, AlertTriangle, ShieldCheck } from 'lucide-react';
 
-export default function AIAdvisor({ token, API_BASE, onAddAction }) {
+export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt }) {
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [adoptingId, setAdoptingId] = useState(null);
   const [error, setError] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
-  const fetchRecommendations = async (forceRefresh = false) => {
+  const fetchRecommendations = async () => {
     setLoading(true);
     setError('');
     setFeedbackMsg('');
     try {
+      // POST current local client state to backend AI Engine
       const res = await fetch(`${API_BASE}/recommendations`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user, logs, simulation })
       });
       if (!res.ok) throw new Error('Failed to retrieve personalized recommendations.');
       const data = await res.json();
@@ -28,64 +31,33 @@ export default function AIAdvisor({ token, API_BASE, onAddAction }) {
 
   useEffect(() => {
     fetchRecommendations();
-  }, [token]);
+  }, [logs.length]); // Refresh recommendations if number of logs change
 
-  // Adopt a recommendation and link it to the Simulator
-  const handleAdoptRecommendation = async (rec) => {
+  const handleAdoptRecommendation = (rec) => {
     setAdoptingId(rec.id);
     setError('');
     setFeedbackMsg('');
-    try {
-      // 1. Get current simulation plan
-      const simGet = await fetch(`${API_BASE}/simulation`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!simGet.ok) throw new Error('Failed to retrieve simulation settings.');
-      const currentSim = await simGet.json();
 
-      // Avoid duplicates
-      if (currentSim.plannedActions.includes(rec.title)) {
-        setFeedbackMsg(`"${rec.title}" is already in your Simulator action plan!`);
-        setAdoptingId(null);
-        return;
-      }
-
-      // 2. Add action and add to savings
-      const updatedActions = [...currentSim.plannedActions, rec.title];
-      const updatedSavings = (currentSim.estimatedSavings || 0) + rec.estimatedSavings;
-      
-      // Calculate a projected target percentage based on savings
-      // Let's assume average weekly emissions of ~100 kg. If savings are 20kg, target is 20%.
-      // We will default target to a standard 5% increase per action up to 50%
-      const targetPercent = Math.min(Math.round(currentSim.targetReductionPercentage + 5), 50);
-
-      const simPost = await fetch(`${API_BASE}/simulation`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          targetReductionPercentage: targetPercent,
-          plannedActions: updatedActions,
-          estimatedSavings: parseFloat(updatedSavings.toFixed(1))
-        })
-      });
-
-      const postData = await simPost.json();
-      if (!simPost.ok) throw new Error(postData.error || 'Failed to update simulator plan.');
-
-      setFeedbackMsg(`"${rec.title}" adopted! Added to your Reduction Simulator plan.`);
-
-      // Trigger Confetti or notifications if backend unlocked badges
-      if (onAddAction && postData.unlockedBadges) {
-        onAddAction(postData.unlockedBadges);
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
+    // Check if duplicate
+    if (simulation.plannedActions.includes(rec.title)) {
+      setFeedbackMsg(`"${rec.title}" is already in your Simulator action plan!`);
       setAdoptingId(null);
+      return;
     }
+
+    const updatedActions = [...simulation.plannedActions, rec.title];
+    const updatedSavings = parseFloat(((simulation.estimatedSavings || 0) + rec.estimatedSavings).toFixed(1));
+    const targetPercent = Math.min(Math.round(simulation.targetReductionPercentage + 5), 50);
+
+    // Call local save handler
+    onAdopt({
+      targetReductionPercentage: targetPercent,
+      plannedActions: updatedActions,
+      estimatedSavings: updatedSavings
+    });
+
+    setFeedbackMsg(`"${rec.title}" adopted! Added to your Reduction Simulator plan.`);
+    setAdoptingId(null);
   };
 
   const getCategoryIcon = (category) => {
@@ -123,7 +95,7 @@ export default function AIAdvisor({ token, API_BASE, onAddAction }) {
         </div>
         <button 
           className="btn btn-secondary" 
-          onClick={() => fetchRecommendations(true)} 
+          onClick={fetchRecommendations} 
           disabled={loading}
           style={{ gap: '8px' }}
         >
@@ -151,7 +123,6 @@ export default function AIAdvisor({ token, API_BASE, onAddAction }) {
           {[1, 2, 3, 4].map(n => (
             <div key={n} className="glass-card" style={{ height: '220px', display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* Shimmer Placeholder Skeletons */}
                 <div style={{ width: '50%', height: '20px', background: 'hsla(var(--text-primary), 0.05)', borderRadius: '4px' }}></div>
                 <div style={{ width: '80%', height: '14px', background: 'hsla(var(--text-primary), 0.03)', borderRadius: '4px' }}></div>
                 <div style={{ width: '90%', height: '14px', background: 'hsla(var(--text-primary), 0.03)', borderRadius: '4px' }}></div>
@@ -165,7 +136,7 @@ export default function AIAdvisor({ token, API_BASE, onAddAction }) {
           <Compass size={48} style={{ marginBottom: '16px' }} />
           <h3>No recommendations yet</h3>
           <p style={{ margin: '8px 0 20px 0' }}>Log some activities in transport, electricity, or food to get tailored advisor tips!</p>
-          <button className="btn btn-primary" onClick={() => fetchRecommendations()}>Load Engine</button>
+          <button className="btn btn-primary" onClick={fetchRecommendations}>Load Engine</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
@@ -174,7 +145,6 @@ export default function AIAdvisor({ token, API_BASE, onAddAction }) {
             return (
               <div key={rec.id} className="glass-card glass-card-ai animate-fade-in" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '16px' }}>
                 <div>
-                  {/* Category and Difficulty Headers */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <span style={{ 
                       display: 'inline-flex', 
@@ -207,7 +177,6 @@ export default function AIAdvisor({ token, API_BASE, onAddAction }) {
                   <p style={{ fontSize: '0.88rem', color: 'hsl(var(--text-secondary))', lineHeight: '1.45' }}>{rec.description}</p>
                 </div>
 
-                {/* Footer: Savings and Adopt Button */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid hsl(var(--border-color))', paddingTop: '14px', marginTop: '4px' }}>
                   <div>
                     <span style={{ fontSize: '1.1rem', fontWeight: '800', color: 'hsl(var(--accent-emerald))' }}>
