@@ -1,5 +1,5 @@
 # Stage 1: Build the React frontend
-FROM node:18-alpine AS client-builder
+FROM node:22-alpine AS client-builder
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm install
@@ -7,7 +7,7 @@ COPY client/ ./
 RUN npm run build
 
 # Stage 2: Prepare the Node.js server & runtime
-FROM node:18-alpine
+FROM node:22-alpine
 WORKDIR /app
 
 # Copy server package details and install production dependencies
