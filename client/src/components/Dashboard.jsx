@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Award, Zap, Flame, Trash2, ShieldAlert, Plus, RefreshCw, Car, FlameKindling, Utensils, ShoppingBag } from 'lucide-react';
+import { Award, Zap, Flame, Trash2, ShieldAlert, Plus, RefreshCw, Car, FlameKindling, Utensils, ShoppingBag, Leaf } from 'lucide-react';
 
 export default function Dashboard({ token, API_BASE, onNavigate }) {
   const [data, setData] = useState(null);

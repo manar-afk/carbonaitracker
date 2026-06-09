@@ -294,7 +294,7 @@ export default function App() {
               {import.meta.env.VITE_GOOGLE_CLIENT_ID ? (
                 <div ref={googleBtnRef} className="google-btn-wrapper"></div>
               ) : (
-                <div style={{ textalign: 'center', width: '100%' }}>
+                <div style={{ textAlign: 'center', width: '100%' }}>
                   <p style={{ fontSize: '0.8rem', color: 'hsl(var(--text-muted))', marginBottom: '8px' }}>Google Auth client ID not configured.</p>
                 </div>
               )}
@@ -405,7 +405,7 @@ export default function App() {
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid hsl(var(--border-color))', paddingLeft: '12px' }}>
-              <div style={{ textalign: 'right', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>{user?.name}</span>
                 <span style={{ fontSize: '0.7rem', color: 'hsl(var(--text-muted))' }}>🔥 {user?.streak} Day Streak</span>
               </div>
