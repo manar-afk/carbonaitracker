@@ -1,5 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
 import { Sparkles, Check, Compass, Car, Zap, Utensils, ShoppingBag, Loader, AlertTriangle, ShieldCheck } from 'lucide-react';
+
+const CACHE_KEY = 'advisor_recommendations_cache';
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes cache Time-To-Live
 
 export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt }) {
   const [recommendations, setRecommendations] = useState([]);
@@ -8,12 +12,33 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
   const [error, setError] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = async (forceRefresh = false) => {
     setLoading(true);
     setError('');
     setFeedbackMsg('');
+
+    // 1. Check Local Cache (Resource Efficiency)
+    if (!forceRefresh) {
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const { timestamp, logsCount, recs } = JSON.parse(cached);
+          const isFresh = Date.now() - timestamp < CACHE_TTL_MS;
+          const hasSameLogs = logsCount === logs.length;
+
+          if (isFresh && hasSameLogs) {
+            setRecommendations(recs);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (cacheErr) {
+        console.warn('Failed to parse advisor cache:', cacheErr);
+      }
+    }
+
+    // 2. Fetch fresh recommendations from server
     try {
-      // POST current local client state to backend AI Engine
       const res = await fetch(`${API_BASE}/recommendations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -22,6 +47,13 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
       if (!res.ok) throw new Error('Failed to retrieve personalized recommendations.');
       const data = await res.json();
       setRecommendations(data);
+
+      // Write to cache
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        timestamp: Date.now(),
+        logsCount: logs.length,
+        recs: data
+      }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -30,8 +62,18 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
   };
 
   useEffect(() => {
-    fetchRecommendations();
-  }, [logs.length]); // Refresh recommendations if number of logs change
+    let active = true;
+    const timeoutId = setTimeout(() => {
+      if (active) {
+        fetchRecommendations();
+      }
+    }, 0);
+    return () => {
+      active = false;
+      clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs.length]); // Auto-refresh if the log history count changes
 
   const handleAdoptRecommendation = (rec) => {
     setAdoptingId(rec.id);
@@ -49,7 +91,6 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
     const updatedSavings = parseFloat(((simulation.estimatedSavings || 0) + rec.estimatedSavings).toFixed(1));
     const targetPercent = Math.min(Math.round(simulation.targetReductionPercentage + 5), 50);
 
-    // Call local save handler
     onAdopt({
       targetReductionPercentage: targetPercent,
       plannedActions: updatedActions,
@@ -86,7 +127,7 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '2rem', fontWeight: '800', letterSpacing: '-0.5px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Sparkles size={28} style={{ color: 'hsl(var(--accent-cyan))' }} />
+            <Sparkles size={28} style={{ color: 'hsl(var(--accent-cyan))' }} aria-hidden="true" />
             AI Advisor
           </h1>
           <p style={{ color: 'hsl(var(--text-secondary))' }}>
@@ -95,7 +136,7 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
         </div>
         <button 
           className="btn btn-secondary" 
-          onClick={fetchRecommendations} 
+          onClick={() => fetchRecommendations(true)} 
           disabled={loading}
           style={{ gap: '8px' }}
         >
@@ -105,21 +146,21 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
 
       {feedbackMsg && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'hsl(var(--accent-emerald))', background: 'hsla(var(--accent-emerald), 0.1)', padding: '12px', borderRadius: 'var(--border-radius-sm)', fontSize: '0.9rem', border: '1px solid hsla(var(--accent-emerald), 0.2)' }}>
-          <ShieldCheck size={18} />
+          <ShieldCheck size={18} aria-hidden="true" />
           {feedbackMsg}
         </div>
       )}
 
       {error && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'hsl(var(--accent-coral))', background: 'hsla(var(--accent-coral), 0.1)', padding: '12px', borderRadius: 'var(--border-radius-sm)', fontSize: '0.9rem', border: '1px solid hsla(var(--accent-coral), 0.2)' }}>
-          <AlertTriangle size={18} />
+          <AlertTriangle size={18} aria-hidden="true" />
           {error}
         </div>
       )}
 
       {/* Recommendations Cards Grid */}
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }} aria-label="Loading recommendations">
           {[1, 2, 3, 4].map(n => (
             <div key={n} className="glass-card" style={{ height: '220px', display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -133,10 +174,10 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
         </div>
       ) : recommendations.length === 0 ? (
         <div className="glass-card" style={{ textAlign: 'center', padding: '60px 20px', color: 'hsl(var(--text-muted))' }}>
-          <Compass size={48} style={{ marginBottom: '16px' }} />
+          <Compass size={48} style={{ marginBottom: '16px' }} aria-hidden="true" />
           <h3>No recommendations yet</h3>
           <p style={{ margin: '8px 0 20px 0' }}>Log some activities in transport, electricity, or food to get tailored advisor tips!</p>
-          <button className="btn btn-primary" onClick={fetchRecommendations}>Load Engine</button>
+          <button className="btn btn-primary" onClick={() => fetchRecommendations()}>Load Engine</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
@@ -190,12 +231,13 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
                     style={{ padding: '8px 16px', fontSize: '0.85rem' }} 
                     onClick={() => handleAdoptRecommendation(rec)}
                     disabled={adoptingId !== null}
+                    aria-label={`Adopt carbon reduction tip: ${rec.title}`}
                   >
                     {adoptingId === rec.id ? (
                       <Loader size={14} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
                     ) : (
                       <>
-                        <Check size={14} />
+                        <Check size={14} aria-hidden="true" />
                         Adopt Tip
                       </>
                     )}
@@ -209,3 +251,19 @@ export default function AIAdvisor({ user, logs, simulation, API_BASE, onAdopt })
     </div>
   );
 }
+
+AIAdvisor.propTypes = {
+  user: PropTypes.shape({
+    name: PropTypes.string,
+    streak: PropTypes.number,
+    badges: PropTypes.arrayOf(PropTypes.string)
+  }).isRequired,
+  logs: PropTypes.arrayOf(PropTypes.object).isRequired,
+  simulation: PropTypes.shape({
+    targetReductionPercentage: PropTypes.number,
+    plannedActions: PropTypes.arrayOf(PropTypes.string),
+    estimatedSavings: PropTypes.number
+  }).isRequired,
+  API_BASE: PropTypes.string.isRequired,
+  onAdopt: PropTypes.func.isRequired
+};

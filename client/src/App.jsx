@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Leaf, Sun, Moon, Award, Calendar, Compass, PlusCircle, LayoutDashboard, Sliders, Edit3, Check } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Leaf, Sun, Moon, Award, Compass, PlusCircle, LayoutDashboard, Sliders, Edit3, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 import Dashboard from './components/Dashboard';
@@ -235,7 +235,7 @@ export default function App() {
     <div className="app-container">
       {/* Toast Notification for Unlocked Badges */}
       {unlockedBadgeNotify && (
-        <div className="animate-fade-in" style={{
+        <div className="animate-fade-in" role="alert" aria-live="polite" style={{
           position: 'fixed',
           top: '24px',
           right: '24px',
@@ -374,6 +374,7 @@ export default function App() {
         )}
         {activeTab === 'simulator' && (
           <Simulator 
+            key={simulation.updatedAt || 'simulator'}
             logs={logs} 
             simulation={simulation} 
             onSave={handleSaveSimulation} 

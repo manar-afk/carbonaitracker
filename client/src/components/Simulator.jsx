@@ -1,31 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { Sliders, Leaf, Save, AlertCircle } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import PropTypes from 'prop-types';
+import { Sliders, Leaf } from 'lucide-react';
 
 export default function Simulator({ logs, simulation, onSave }) {
-  // Simulator Parameters (Sliders)
-  const [elecPercent, setElecPercent] = useState(0);
-  const [transitKm, setTransitKm] = useState(0);
-  const [dietSwaps, setDietSwaps] = useState(0);
+  const [targetReduction, setTargetReduction] = useState(simulation.targetReductionPercentage || 15);
 
-  // Checkboxes
-  const [dryLaundry, setDryLaundry] = useState(false);
-  const [unplugVampire, setUnplugVampire] = useState(false);
-  const [ledBulbs, setLedBulbs] = useState(false);
+  // Initialize state variables from simulation.plannedActions on mount
+  const [elecPercent, setElecPercent] = useState(() => {
+    const actions = simulation.plannedActions || [];
+    return actions.some(a => a.includes('electricity') || a.includes('Power')) ? 15 : 0;
+  });
+  const [transitKm, setTransitKm] = useState(() => {
+    const actions = simulation.plannedActions || [];
+    return actions.some(a => a.includes('transit') || a.includes('commute')) ? 40 : 0;
+  });
+  const [dietSwaps, setDietSwaps] = useState(() => {
+    const actions = simulation.plannedActions || [];
+    return actions.some(a => a.includes('vegetarian') || a.includes('diet') || a.includes('meat')) ? 5 : 0;
+  });
 
-  const [targetReduction, setTargetReduction] = useState(15);
-  const [plannedActions, setPlannedActions] = useState([]);
+  const [dryLaundry, setDryLaundry] = useState(() => (simulation.plannedActions || []).includes('Line dry laundry'));
+  const [unplugVampire, setUnplugVampire] = useState(() => (simulation.plannedActions || []).includes('Unplug vampire electronics'));
+  const [ledBulbs, setLedBulbs] = useState(() => (simulation.plannedActions || []).includes('Upgrade to LED bulbs'));
 
-  // Calculated variables
-  const [currentFootprint, setCurrentFootprint] = useState(85.0); // baseline
-  const [projectedSavings, setProjectedSavings] = useState(0);
-  const [projectedFootprint, setProjectedFootprint] = useState(85.0);
-  const [goalMet, setGoalMet] = useState(false);
-
-  const [successMsg, setSuccessMsg] = useState('');
-
-  // Calculate baseline weekly footprint from logs
-  useEffect(() => {
-    const now = new Date();
+  // Calculated variables (Memoized baseline weekly footprint)
+  const currentFootprint = useMemo(() => {
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
@@ -34,24 +33,13 @@ export default function Simulator({ logs, simulation, onSave }) {
     const weeklyTotal = weeklyLogs.reduce((a, b) => a + b.co2Emissions, 0);
 
     // Default to 85 kg (national average) if they have no logs logged
-    setCurrentFootprint(weeklyTotal > 5 ? parseFloat(weeklyTotal.toFixed(1)) : 85.0);
+    return weeklyTotal > 5 ? parseFloat(weeklyTotal.toFixed(1)) : 85.0;
+  }, [logs]);
 
-    // Set active targets
-    setTargetReduction(simulation.targetReductionPercentage || 15);
-    
-    // Set active state variables from saved actions
-    const actions = simulation.plannedActions || [];
-    if (actions.some(a => a.includes('electricity') || a.includes('Power'))) setElecPercent(15);
-    if (actions.some(a => a.includes('transit') || a.includes('commute'))) setTransitKm(40);
-    if (actions.some(a => a.includes('vegetarian') || a.includes('diet') || a.includes('meat'))) setDietSwaps(5);
-    
-    if (actions.includes('Line dry laundry')) setDryLaundry(true);
-    if (actions.includes('Unplug vampire electronics')) setUnplugVampire(true);
-    if (actions.includes('Upgrade to LED bulbs')) setLedBulbs(true);
-  }, [logs.length, simulation.updatedAt]); // Sync if logs or target changes
+  const [successMsg, setSuccessMsg] = useState('');
 
-  // Recalculate savings in real-time
-  useEffect(() => {
+  // Recalculate savings in real-time (Memoized for Efficiency)
+  const simulatedResults = useMemo(() => {
     let savings = 0;
     const actionsList = [];
 
@@ -107,22 +95,25 @@ export default function Simulator({ logs, simulation, onSave }) {
 
     const finalSavings = parseFloat(savings.toFixed(1));
     const projected = Math.max(parseFloat((currentFootprint - finalSavings).toFixed(1)), 0);
-    
-    setProjectedSavings(finalSavings);
-    setProjectedFootprint(projected);
-    setPlannedActions(actionsList);
-
     const percentSaved = currentFootprint > 0 ? (finalSavings / currentFootprint) * 100 : 0;
-    setGoalMet(percentSaved >= targetReduction);
+    const goalMet = percentSaved >= targetReduction;
 
+    return {
+      savings: finalSavings,
+      projectedFootprint: projected,
+      actionsList,
+      goalMet
+    };
   }, [elecPercent, transitKm, dietSwaps, dryLaundry, unplugVampire, ledBulbs, currentFootprint, targetReduction, simulation.plannedActions]);
+
+
 
   const handleSavePlan = () => {
     setSuccessMsg('');
     onSave({
       targetReductionPercentage: targetReduction,
-      plannedActions,
-      estimatedSavings: projectedSavings,
+      plannedActions: simulatedResults.actionsList,
+      estimatedSavings: simulatedResults.savings,
       updatedAt: new Date().toISOString()
     });
 
@@ -133,18 +124,22 @@ export default function Simulator({ logs, simulation, onSave }) {
     }, 4000);
   };
 
-  // Bar Chart calculations
-  const maxBar = Math.max(currentFootprint, projectedFootprint, 10);
+  // Bar Chart heights (Memoized)
   const chartHeight = 160;
-  const currentBarHeight = (currentFootprint / maxBar) * chartHeight;
-  const projectedBarHeight = (projectedFootprint / maxBar) * chartHeight;
+  const barHeights = useMemo(() => {
+    const maxBar = Math.max(currentFootprint, simulatedResults.projectedFootprint, 10);
+    return {
+      current: (currentFootprint / maxBar) * chartHeight,
+      projected: (simulatedResults.projectedFootprint / maxBar) * chartHeight
+    };
+  }, [currentFootprint, simulatedResults.projectedFootprint]);
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
       <div>
         <h1 style={{ fontSize: '2rem', fontWeight: '800', letterSpacing: '-0.5px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Sliders size={28} style={{ color: 'hsl(var(--accent-emerald))' }} />
+          <Sliders size={28} style={{ color: 'hsl(var(--accent-emerald))' }} aria-hidden="true" />
           Footprint Simulator
         </h1>
         <p style={{ color: 'hsl(var(--text-secondary))' }}>
@@ -154,7 +149,7 @@ export default function Simulator({ logs, simulation, onSave }) {
 
       {successMsg && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'hsl(var(--accent-emerald))', background: 'hsla(var(--accent-emerald), 0.1)', padding: '12px', borderRadius: 'var(--border-radius-sm)', fontSize: '0.9rem', border: '1px solid hsla(var(--accent-emerald), 0.2)' }}>
-          <Leaf size={18} />
+          <Leaf size={18} aria-hidden="true" />
           {successMsg}
         </div>
       )}
@@ -255,7 +250,7 @@ export default function Simulator({ logs, simulation, onSave }) {
           </div>
         </div>
 
-        {/* Right Side: Chart */}
+        {/* Right Side: Projections */}
         <div className="glass-card col-4" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h3 style={{ fontSize: '1.2rem', fontWeight: '800', borderBottom: '1px solid hsl(var(--border-color))', paddingBottom: '12px' }}>
             Projections & Target
@@ -279,26 +274,26 @@ export default function Simulator({ logs, simulation, onSave }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '10px 0' }}>
-            <svg width="220" height={chartHeight + 30} style={{ overflow: 'visible' }}>
-              <rect x="30" y={chartHeight - currentBarHeight} width="50" height={currentBarHeight} fill="hsl(var(--accent-coral))" rx="6" />
-              <text x="55" y={chartHeight - currentBarHeight - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">{currentFootprint}kg</text>
+            <svg width="220" height={chartHeight + 30} style={{ overflow: 'visible' }} aria-label="Comparison chart showing current footprint versus simulated footprint">
+              <rect x="30" y={chartHeight - barHeights.current} width="50" height={barHeights.current} fill="hsl(var(--accent-coral))" rx="6" />
+              <text x="55" y={chartHeight - barHeights.current - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">{currentFootprint}kg</text>
               <text x="55" y={chartHeight + 16} textAnchor="middle" fill="hsl(var(--text-muted))" fontSize="10" fontWeight="600">Current</text>
 
-              <rect x="140" y={chartHeight - projectedBarHeight} width="50" height={projectedBarHeight} fill="hsl(var(--accent-emerald))" rx="6" />
-              <text x="165" y={chartHeight - projectedBarHeight - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">{projectedFootprint}kg</text>
+              <rect x="140" y={chartHeight - barHeights.projected} width="50" height={barHeights.projected} fill="hsl(var(--accent-emerald))" rx="6" />
+              <text x="165" y={chartHeight - barHeights.projected - 8} textAnchor="middle" fill="white" fontSize="11" fontWeight="700">{simulatedResults.projectedFootprint}kg</text>
               <text x="165" y={chartHeight + 16} textAnchor="middle" fill="hsl(var(--text-muted))" fontSize="10" fontWeight="600">Projected</text>
             </svg>
           </div>
 
           <div style={{
-            background: goalMet ? 'hsla(var(--accent-emerald), 0.1)' : 'hsla(var(--accent-gold), 0.1)',
-            border: `1px solid ${goalMet ? 'hsla(var(--accent-emerald), 0.3)' : 'hsla(var(--accent-gold), 0.3)'}`,
+            background: simulatedResults.goalMet ? 'hsla(var(--accent-emerald), 0.1)' : 'hsla(var(--accent-gold), 0.1)',
+            border: `1px solid ${simulatedResults.goalMet ? 'hsla(var(--accent-emerald), 0.3)' : 'hsla(var(--accent-gold), 0.3)'}`,
             borderRadius: 'var(--border-radius-sm)',
             padding: '14px',
             textAlign: 'center'
           }}>
             <h4 style={{ 
-              color: goalMet ? 'hsl(var(--accent-emerald))' : 'hsl(var(--accent-gold))', 
+              color: simulatedResults.goalMet ? 'hsl(var(--accent-emerald))' : 'hsl(var(--accent-gold))', 
               fontWeight: '700', 
               fontSize: '0.95rem',
               display: 'flex',
@@ -306,12 +301,12 @@ export default function Simulator({ logs, simulation, onSave }) {
               justifyContent: 'center',
               gap: '6px'
             }}>
-              {goalMet ? 'Target Met!' : 'Target Pending'}
+              {simulatedResults.goalMet ? 'Target Met!' : 'Target Pending'}
             </h4>
             
             <p style={{ fontSize: '0.8rem', color: 'hsl(var(--text-secondary))', marginTop: '6px' }}>
-              You are simulating a savings of <strong style={{ color: 'white' }}>{projectedSavings} kg CO₂e</strong>. 
-              This is a <strong style={{ color: 'white' }}>{currentFootprint > 0 ? Math.round((projectedSavings / currentFootprint) * 100) : 0}%</strong> reduction.
+              You are simulating a savings of <strong style={{ color: 'white' }}>{simulatedResults.savings} kg CO₂e</strong>. 
+              This is a <strong style={{ color: 'white' }}>{currentFootprint > 0 ? Math.round((simulatedResults.savings / currentFootprint) * 100) : 0}%</strong> reduction.
             </p>
           </div>
 
@@ -325,11 +320,11 @@ export default function Simulator({ logs, simulation, onSave }) {
         </div>
 
         {/* Action list summary */}
-        {plannedActions.length > 0 && (
+        {simulatedResults.actionsList.length > 0 && (
           <div className="glass-card col-12">
             <h4 style={{ fontSize: '0.95rem', fontWeight: '700', marginBottom: '12px' }}>Your Planned Carbon Saving Actions</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {plannedActions.map((action, idx) => (
+              {simulatedResults.actionsList.map((action, idx) => (
                 <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', color: 'hsl(var(--text-secondary))' }}>
                   <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'hsl(var(--accent-emerald))' }}></div>
                   {action}
@@ -343,3 +338,13 @@ export default function Simulator({ logs, simulation, onSave }) {
     </div>
   );
 }
+
+Simulator.propTypes = {
+  logs: PropTypes.arrayOf(PropTypes.object).isRequired,
+  simulation: PropTypes.shape({
+    targetReductionPercentage: PropTypes.number,
+    plannedActions: PropTypes.arrayOf(PropTypes.string),
+    estimatedSavings: PropTypes.number
+  }).isRequired,
+  onSave: PropTypes.func.isRequired
+};

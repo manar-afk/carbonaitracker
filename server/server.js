@@ -1,217 +1,172 @@
+/**
+ * CarbonAItracker Backend Server Entrypoint
+ * Implements security headers, request rate-limiting, Gzip compression,
+ * schema validation, and Express error boundaries.
+ */
+
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 8080; // Default to Cloud Run port 8080
+const PORT = process.env.PORT || 8080;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// --- 1. SECURITY & PRODUCTION CHECKS ---
 
-// ---------------- AI RECOMMENDATIONS ENGINE ----------------
-
-// Local Heuristics Recommendation Engine (Fallback)
-function generateHeuristicRecommendations(logs, simulation) {
-  const categories = { transport: 0, electricity: 0, food: 0, purchase: 0 };
-  logs.forEach(l => {
-    if (categories[l.category] !== undefined) {
-      categories[l.category] += l.co2Emissions;
-    }
-  });
-
-  const recommendations = [];
-
-  // 1. Transportation
-  if (categories.transport > 5) {
-    recommendations.push({
-      id: "rec_trans_1",
-      title: "Public Transit Challenge",
-      description: "Replace at least 2 car commutes this week with train or bus travel to lower your transport footprint.",
-      category: "transport",
-      estimatedSavings: parseFloat((categories.transport * 0.4).toFixed(1)),
-      difficulty: "easy"
-    });
-    recommendations.push({
-      id: "rec_trans_2",
-      title: "Active Commuting",
-      description: "Walk or bike for short trips under 3 km instead of driving. It is healthy for both you and the planet.",
-      category: "transport",
-      estimatedSavings: parseFloat((categories.transport * 0.15).toFixed(1)),
-      difficulty: "easy"
-    });
-  } else {
-    recommendations.push({
-      id: "rec_trans_3",
-      title: "Carpooling Connection",
-      description: "Coordinate with coworkers or neighbors to carpool for your daily commute, cutting emissions in half.",
-      category: "transport",
-      estimatedSavings: 15.0,
-      difficulty: "medium"
-    });
+// Strict env key checks for production environment
+if (process.env.NODE_ENV === 'production') {
+  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY_HERE') {
+    console.warn('[SECURITY WARNING]: GEMINI_API_KEY is not configured or is set to default. Running on fallback heuristics engine.');
   }
-
-  // 2. Electricity
-  if (categories.electricity > 10) {
-    recommendations.push({
-      id: "rec_elec_1",
-      title: "Unplug Vampire Electronics",
-      description: "Unplug electronics (TV, computer chargers, microwave) when not in use. Standby power accounts for 5-10% of electricity use.",
-      category: "electricity",
-      estimatedSavings: parseFloat((categories.electricity * 0.08).toFixed(1)),
-      difficulty: "easy"
-    });
-    recommendations.push({
-      id: "rec_elec_2",
-      title: "LED Upgrade",
-      description: "Replace your remaining incandescent or CFL bulbs with energy-efficient LEDs, which use 75% less energy.",
-      category: "electricity",
-      estimatedSavings: parseFloat((categories.electricity * 0.12).toFixed(1)),
-      difficulty: "medium"
-    });
-  } else {
-    recommendations.push({
-      id: "rec_elec_3",
-      title: "Wash Cold & Hang Dry",
-      description: "Wash your laundry in cold water instead of hot, and air dry your clothes on a rack to save dryer power.",
-      category: "electricity",
-      estimatedSavings: 8.5,
-      difficulty: "easy"
-    });
-  }
-
-  // 3. Food
-  const foodLogs = logs.filter(l => l.category === 'food');
-  const beefCount = foodLogs.filter(l => l.details.mealType === 'beef_heavy').length;
-  
-  if (beefCount > 0) {
-    recommendations.push({
-      id: "rec_food_1",
-      title: "Beef Substitution",
-      description: `You logged ${beefCount} beef meal(s) recently. Swapping beef for chicken, fish, or beans reduces carbon emissions by up to 80% per meal.`,
-      category: "food",
-      estimatedSavings: parseFloat((beefCount * 2.2).toFixed(1)),
-      difficulty: "easy"
-    });
-  }
-  
-  recommendations.push({
-    id: "rec_food_2",
-    title: "Meatless Mondays",
-    description: "Dedicate one day a week to entirely plant-based eating. Raising livestock produces significant greenhouse gases.",
-    category: "food",
-    estimatedSavings: 12.0,
-    difficulty: "easy"
-  });
-
-  // 4. Purchases
-  if (categories.purchase > 20) {
-    recommendations.push({
-      id: "rec_purch_1",
-      title: "Buy Secondhand First",
-      description: "For clothing or furniture, browse thrifts or online marketplaces first. Extending item lifetimes cuts manufacturing carbon.",
-      category: "purchase",
-      estimatedSavings: parseFloat((categories.purchase * 0.35).toFixed(1)),
-      difficulty: "medium"
-    });
-  }
-
-  // 5. Simulator target
-  if (simulation && simulation.targetReductionPercentage > 0) {
-    recommendations.push({
-      id: "rec_sim_1",
-      title: `Achieve Your ${simulation.targetReductionPercentage}% Goal`,
-      description: `To hit your reduction goal of ${simulation.targetReductionPercentage}%, focus on implementing actions like: ${simulation.plannedActions?.join(', ') || 'reducing energy use and commuting green'}.`,
-      category: "electricity",
-      estimatedSavings: simulation.estimatedSavings || 10,
-      difficulty: "medium"
-    });
-  }
-
-  return recommendations.slice(0, 5);
 }
 
-// Recommendations API Endpoint (receives data in body)
-app.post('/api/recommendations', async (req, res) => {
-  const { user, logs, simulation } = req.body;
-  const targetLogs = logs || [];
-  const targetSim = simulation || { targetReductionPercentage: 0, plannedActions: [], estimatedSavings: 0 };
-  const targetUser = user || { name: 'Eco Explorer', streak: 0, badges: [] };
+// Enable Gzip/Deflate compression for smaller bundle transfers
+app.use(compression());
 
-  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY_HERE') {
-    const heuristicData = generateHeuristicRecommendations(targetLogs, targetSim);
-    return res.json(heuristicData);
+// Helmet secure HTTP headers with custom Content Security Policy (CSP) for Google Sign-In
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "https://accounts.google.com/gsi/client", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      frameSrc: ["'self'", "https://accounts.google.com/gsi/"],
+      connectSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https://*"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: []
+    }
+  },
+  crossOriginEmbedderPolicy: false, // Prevents iframe loading issues for Google auth
+  referrerPolicy: { policy: 'same-origin' }
+}));
+
+// CORS Configuration - Restrict wildcard access in production
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? false // Same-origin only when serving the frontend statically
+    : true,  // Allow all origins in local development mode
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  maxAge: 86400 // Cache preflight requests for 24 hours
+};
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '100kb' })); // Restrict payload size to prevent DoS spams
+
+// Rate limiter for recommendation endpoints
+const adviceRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes window
+  max: 60, // Limit each IP to 60 recommendations requests per window
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  message: { error: 'Too many recommendation requests from this IP. Please try again after 15 minutes.' }
+});
+
+// --- 2. REQUEST SCHEMAS & INPUT VALIDATORS ---
+
+/**
+ * Validates request payload schemas for Recommendations API
+ * Blocks prompt injections, malicious strings, and invalid types.
+ * @param {express.Request} req 
+ * @param {express.Response} res 
+ * @param {express.NextFunction} next 
+ */
+function validateRecommendationsPayload(req, res, next) {
+  const { user, logs, simulation } = req.body;
+
+  // 1. Validate User Structure
+  if (user) {
+    if (typeof user !== 'object') {
+      return res.status(400).json({ error: 'User field must be an object' });
+    }
+    // Strict alphanumeric/space validation for user name (blocks script/HTML tag injections)
+    if (user.name && (typeof user.name !== 'string' || !/^[a-zA-Z0-9\s]{1,30}$/.test(user.name))) {
+      return res.status(400).json({ error: 'User name must be alphanumeric and between 1-30 characters' });
+    }
+    if (user.streak !== undefined && (!Number.isInteger(user.streak) || user.streak < 0)) {
+      return res.status(400).json({ error: 'User streak must be a non-negative integer' });
+    }
+    if (user.badges && !Array.isArray(user.badges)) {
+      return res.status(400).json({ error: 'User badges must be an array of strings' });
+    }
   }
 
-  try {
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    
-    // Calculate category breakdowns to give Gemini data context
-    const categoryTotals = { transport: 0, electricity: 0, food: 0, purchase: 0 };
-    targetLogs.forEach(l => {
-      if (categoryTotals[l.category] !== undefined) {
-        categoryTotals[l.category] += l.co2Emissions;
-      }
-    });
-
-    const totalEmissions = Object.values(categoryTotals).reduce((a, b) => a + b, 0);
-
-    const prompt = `
-You are an expert environmental consultant and AI carbon advisor for a premium app called CarbonAItracker.
-Your task is to analyze the user's recent carbon emissions footprint data and provide a list of exactly 4-5 highly personalized, practical, and actionable carbon reduction recommendations.
-
-User Context:
-- Name: ${targetUser.name}
-- Active Streak: ${targetUser.streak} days
-- Earned Badges: ${targetUser.badges?.join(', ') || 'None yet'}
-- Recent Carbon Emissions breakdown:
-  * Transportation: ${categoryTotals.transport.toFixed(1)} kg CO2
-  * Electricity: ${categoryTotals.electricity.toFixed(1)} kg CO2
-  * Food: ${categoryTotals.food.toFixed(1)} kg CO2
-  * Purchases: ${categoryTotals.purchase.toFixed(1)} kg CO2
-  * Total Carbon Footprint: ${totalEmissions.toFixed(1)} kg CO2
-- User's saved simulator target: Reduce by ${targetSim.targetReductionPercentage}% (current target savings: ${targetSim.estimatedSavings?.toFixed(1) || 0} kg CO2).
-- User's simulator planned actions: ${targetSim.plannedActions?.join(', ') || 'No actions selected yet'}.
-
-Please format your response as a JSON object containing a "recommendations" array. Each item in the array must have the following keys:
-1. "id" (string): Unique identifier starting with "rec_ai_" followed by a short unique tag.
-2. "title" (string): A short, punchy title (e.g. "Switch to Cold Wash").
-3. "description" (string): 2-3 sentences explaining exactly how the user can implement this action and why it helps, customized to their data. Reference their specific emissions if relevant (e.g. "Since you logged a beef meal...").
-4. "category" (string): One of: "transport", "electricity", "food", "purchase".
-5. "estimatedSavings" (number): Projected weekly/monthly CO2 savings in kg, matching their scale.
-6. "difficulty" (string): One of: "easy", "medium", "hard".
-
-Return ONLY a valid JSON object. Do not include markdown code block syntax (like \`\`\`json). Just the raw JSON string.
-`;
-
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: 'application/json'
-      }
-    });
-
-    const responseText = result.response.text();
-    const parsed = JSON.parse(responseText);
-    
-    if (parsed && Array.isArray(parsed.recommendations)) {
-      return res.json(parsed.recommendations);
+  // 2. Validate Logs array (max 100 to prevent buffer spams)
+  if (logs) {
+    if (!Array.isArray(logs)) {
+      return res.status(400).json({ error: 'Logs field must be an array' });
     }
-    
-    throw new Error("Invalid output format from Gemini");
+    if (logs.length > 100) {
+      return res.status(400).json({ error: 'Logs array exceeds safe length limit of 100' });
+    }
+    const categories = ['transport', 'electricity', 'food', 'purchase'];
+    for (const log of logs) {
+      if (!log || typeof log !== 'object') {
+        return res.status(400).json({ error: 'Log entry must be an object' });
+      }
+      if (!categories.includes(log.category)) {
+        return res.status(400).json({ error: 'Log category must be a valid tracking category' });
+      }
+      if (typeof log.co2Emissions !== 'number' || isNaN(log.co2Emissions) || log.co2Emissions < 0 || log.co2Emissions > 2000) {
+        return res.status(400).json({ error: 'Log emissions must be a non-negative number under 2,000kg' });
+      }
+      if (log.date && !/^\d{4}-\d{2}-\d{2}$/.test(log.date)) {
+        return res.status(400).json({ error: 'Log date must match YYYY-MM-DD format' });
+      }
+      if (log.details && typeof log.details !== 'object') {
+        return res.status(400).json({ error: 'Log details must be an object' });
+      }
+    }
+  }
+
+  // 3. Validate Simulation object
+  if (simulation) {
+    if (typeof simulation !== 'object') {
+      return res.status(400).json({ error: 'Simulation field must be an object' });
+    }
+    if (simulation.targetReductionPercentage !== undefined && 
+       (typeof simulation.targetReductionPercentage !== 'number' || 
+        simulation.targetReductionPercentage < 0 || 
+        simulation.targetReductionPercentage > 100)) {
+      return res.status(400).json({ error: 'Simulation target percentage must be a number between 0 and 100' });
+    }
+    if (simulation.estimatedSavings !== undefined && 
+       (typeof simulation.estimatedSavings !== 'number' || simulation.estimatedSavings < 0)) {
+      return res.status(400).json({ error: 'Simulation savings must be a non-negative number' });
+    }
+    if (simulation.plannedActions && !Array.isArray(simulation.plannedActions)) {
+      return res.status(400).json({ error: 'Simulation planned actions must be an array' });
+    }
+  }
+
+  next();
+}
+
+// --- 3. RECOMMENDATIONS & FALLBACK ADVISOR ---
+
+const { getAIRecommendations } = require('./geminiService');
+
+// Express Route - Rate limited & Input Validated
+app.post('/api/recommendations', adviceRateLimiter, validateRecommendationsPayload, async (req, res, next) => {
+  const { user, logs, simulation } = req.body;
+  try {
+    const recommendations = await getAIRecommendations(user, logs, simulation);
+    res.json(recommendations);
   } catch (error) {
-    console.error("Error generating recommendations via Gemini API:", error);
-    // Fallback
-    const heuristicData = generateHeuristicRecommendations(targetLogs, targetSim);
-    res.json(heuristicData);
+    next(error);
   }
 });
+
+// --- 4. STATIC SERVING & GLOBAL ERROR BOUNDARIES ---
 
 // Serve frontend assets in production
 const buildPath = path.join(__dirname, '../client/dist');
@@ -221,7 +176,29 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(buildPath, 'index.html'));
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`Stateless server is running on port ${PORT}`);
+// Global Error Handler Middleware (Quality & Security compliant)
+app.use((err, req, res, next) => {
+  console.error('[UNHANDLED APP ERROR]:', err);
+  
+  const status = err.statusCode || 500;
+  const isProd = process.env.NODE_ENV === 'production';
+  
+  // Hide stack trace in production to prevent information disclosure
+  res.status(status).json({
+    error: 'An internal server error occurred while processing recommendations.',
+    message: isProd ? 'Internal Server Error' : err.message,
+    ...(isProd ? {} : { stack: err.stack })
+  });
 });
+
+// Start Server
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Stateless secure server is running on port ${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+  validateRecommendationsPayload
+};

@@ -1,4 +1,4 @@
-import React from 'react';
+import PropTypes from 'prop-types';
 import { Award, Footprints, Flame, Sparkles, Utensils, Train, Zap, ShieldCheck } from 'lucide-react';
 
 const ALL_BADGES = [
@@ -64,7 +64,7 @@ export default function Achievements({ user }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '2rem', fontWeight: '800', letterSpacing: '-0.5px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Award size={28} style={{ color: 'hsl(var(--accent-gold))' }} />
+            <Award size={28} style={{ color: 'hsl(var(--accent-gold))' }} aria-hidden="true" />
             Achievements Cabinet
           </h1>
           <p style={{ color: 'hsl(var(--text-secondary))' }}>
@@ -134,7 +134,7 @@ export default function Achievements({ user }) {
               }}>
                 {isUnlocked ? (
                   <>
-                    <ShieldCheck size={12} />
+                    <ShieldCheck size={12} aria-hidden="true" />
                     Earned
                   </>
                 ) : (
@@ -149,3 +149,9 @@ export default function Achievements({ user }) {
     </div>
   );
 }
+
+Achievements.propTypes = {
+  user: PropTypes.shape({
+    badges: PropTypes.arrayOf(PropTypes.string)
+  }).isRequired
+};

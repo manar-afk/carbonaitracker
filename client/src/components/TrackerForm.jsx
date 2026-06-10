@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
+import PropTypes from 'prop-types';
 import { Leaf, Info, AlertCircle, CheckCircle, Car, Zap, Utensils, ShoppingBag } from 'lucide-react';
 
 const PREVIEW_FACTORS = {
@@ -42,14 +43,11 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
   const [purchaseType, setPurchaseType] = useState('general');
   const [purchaseQty, setPurchaseQty] = useState('1');
 
-  // Real-time Preview Carbon Score
-  const [estimatedCo2, setEstimatedCo2] = useState(0);
-  
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Enforce validation and compute preview
-  useEffect(() => {
+  // Real-time Preview Carbon Score (Memoized to prevent cascading state renders)
+  const estimatedCo2 = useMemo(() => {
     let co2 = 0;
     
     if (category === 'transport') {
@@ -74,15 +72,24 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
       }
     }
     
-    setEstimatedCo2(parseFloat(co2.toFixed(2)));
+    return parseFloat(co2.toFixed(2));
   }, [category, transportType, distance, electricityKwh, foodType, foodMeals, purchaseType, purchaseQty]);
+
+  // Keyboard accessibility handler for tabs (Space / Enter triggers selection)
+  const handleTabKeyDown = (e, tabId) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setCategory(tabId);
+      setErrorMsg('');
+      setSuccessMsg('');
+    }
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
     
-    // Safety Validation
     if (!date) {
       setErrorMsg('Please select a valid date.');
       return;
@@ -119,7 +126,6 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
       details = { itemCategory: purchaseType, quantity: qty };
     }
 
-    // Add entry locally
     onAddLog({
       category,
       date,
@@ -128,14 +134,11 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
     });
 
     setSuccessMsg('Activity logged successfully!');
-    
-    // Reset inputs
     setDistance('');
     setElectricityKwh('');
     setFoodMeals('1');
     setPurchaseQty('1');
 
-    // Automatically navigate back to dashboard after 1.5 seconds
     setTimeout(() => {
       onNavigate('dashboard');
     }, 1500);
@@ -144,15 +147,15 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
   return (
     <div className="glass-card animate-fade-in" style={{ maxWidth: '600px', margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-        <Leaf size={24} style={{ color: 'hsl(var(--accent-emerald))' }} />
+        <Leaf size={24} style={{ color: 'hsl(var(--accent-emerald))' }} aria-hidden="true" />
         <h2 style={{ fontSize: '1.5rem', fontWeight: '800' }}>Log Carbon Activity</h2>
       </div>
       <p style={{ color: 'hsl(var(--text-secondary))', marginBottom: '24px', fontSize: '0.9rem' }}>
         Record your choices today to calculate your carbon impact and unlock achievements.
       </p>
 
-      {/* Tabs Menu */}
-      <div className="tab-container" role="tablist" aria-label="Carbon categories">
+      {/* Tabs Menu (Accessibility: role="tablist") */}
+      <div className="tab-container" role="tablist" aria-label="Tracking categories">
         {[
           { id: 'transport', label: 'Transit', icon: <Car size={16} /> },
           { id: 'electricity', label: 'Power', icon: <Zap size={16} /> },
@@ -167,7 +170,9 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
             aria-controls={`panel-${tab.id}`}
             className={`tab-btn ${category === tab.id ? 'active' : ''}`}
             onClick={() => { setCategory(tab.id); setErrorMsg(''); setSuccessMsg(''); }}
+            onKeyDown={(e) => handleTabKeyDown(e, tab.id)}
             type="button"
+            tabIndex={0}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               {tab.icon}
@@ -261,7 +266,7 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
                 required
               />
               <p style={{ display: 'flex', gap: '6px', fontSize: '0.75rem', color: 'hsl(var(--text-muted))', marginTop: '6px', alignItems: 'center' }}>
-                <Info size={12} />
+                <Info size={12} aria-hidden="true" />
                 Tip: Check your household electricity meter or utility statement.
               </p>
             </div>
@@ -337,7 +342,7 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
         {/* Real-time preview */}
         <div className="co2-preview-box">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Leaf size={18} style={{ color: 'hsl(var(--accent-emerald))' }} />
+            <Leaf size={18} style={{ color: 'hsl(var(--accent-emerald))' }} aria-hidden="true" />
             <div>
               <h4 style={{ fontSize: '0.85rem', fontWeight: '700' }}>Estimated Impact</h4>
               <p style={{ fontSize: '0.75rem', color: 'hsl(var(--text-secondary))' }}>Calculated instantly using standard emission factors</p>
@@ -374,3 +379,8 @@ export default function TrackerForm({ onAddLog, onNavigate }) {
     </div>
   );
 }
+
+TrackerForm.propTypes = {
+  onAddLog: PropTypes.func.isRequired,
+  onNavigate: PropTypes.func.isRequired
+};

@@ -1,14 +1,26 @@
+/**
+ * Gemini AI Integration Service
+ * Interfaces with Google Gemini API and implements prompt injection sanitizers.
+ */
+
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-// Mock Recommendations Engine for Fallback
+/**
+ * Heuristics recommendation generator (Fallback)
+ * @param {Array} logs - User's carbon log history
+ * @param {object} simulation - User's active simulator targets
+ * @returns {Array} List of recommendations
+ */
 function generateMockRecommendations(logs, simulation) {
   const categories = { transport: 0, electricity: 0, food: 0, purchase: 0 };
-  logs.forEach(l => {
+  const targetLogs = logs || [];
+  
+  targetLogs.forEach(l => {
     if (categories[l.category] !== undefined) {
       categories[l.category] += l.co2Emissions;
     }
@@ -16,7 +28,7 @@ function generateMockRecommendations(logs, simulation) {
 
   const recommendations = [];
 
-  // Generate transport suggestions if they have transport emissions
+  // 1. Transportation
   if (categories.transport > 5) {
     recommendations.push({
       id: "rec_trans_1",
@@ -45,7 +57,7 @@ function generateMockRecommendations(logs, simulation) {
     });
   }
 
-  // Generate electricity suggestions if they have electricity emissions
+  // 2. Electricity
   if (categories.electricity > 10) {
     recommendations.push({
       id: "rec_elec_1",
@@ -74,14 +86,14 @@ function generateMockRecommendations(logs, simulation) {
     });
   }
 
-  // Food suggestions
-  const foodLogs = logs.filter(l => l.category === 'food');
-  const beefCount = foodLogs.filter(l => l.details.mealType === 'beef_heavy').length;
+  // 3. Food
+  const foodLogs = targetLogs.filter(l => l.category === 'food');
+  const beefCount = foodLogs.filter(l => l.details?.mealType === 'beef_heavy').length;
   
   if (beefCount > 0) {
     recommendations.push({
       id: "rec_food_1",
-      title: "Beef substitution",
+      title: "Beef Substitution",
       description: `You logged ${beefCount} beef meal(s) recently. Swapping beef for chicken, fish, or beans reduces carbon emissions by up to 80% per meal.`,
       category: "food",
       estimatedSavings: parseFloat((beefCount * 2.2).toFixed(1)),
@@ -98,7 +110,7 @@ function generateMockRecommendations(logs, simulation) {
     difficulty: "easy"
   });
 
-  // Purchases suggestions
+  // 4. Purchases
   if (categories.purchase > 20) {
     recommendations.push({
       id: "rec_purch_1",
@@ -118,41 +130,44 @@ function generateMockRecommendations(logs, simulation) {
     difficulty: "easy"
   });
 
-  // Custom addition if simulation target exists
+  // 5. Simulator target
   if (simulation && simulation.targetReductionPercentage > 0) {
     recommendations.push({
       id: "rec_sim_1",
       title: `Achieve Your ${simulation.targetReductionPercentage}% Goal`,
-      description: `To hit your reduction goal of ${simulation.targetReductionPercentage}%, focus on implementing actions like: ${simulation.plannedActions.join(', ') || 'reducing energy use and commuting green'}.`,
+      description: `To hit your reduction goal of ${simulation.targetReductionPercentage}%, focus on implementing actions like: ${simulation.plannedActions?.join(', ') || 'reducing energy use and commuting green'}.`,
       category: "electricity",
       estimatedSavings: simulation.estimatedSavings || 10,
       difficulty: "medium"
     });
   }
 
-  return recommendations.slice(0, 5); // Return top 5 suggestions
+  return recommendations.slice(0, 5);
 }
 
 /**
  * Generate AI-powered carbon reduction recommendations
- * @param {object} user - The user object
+ * @param {object} user - User details
  * @param {Array} logs - User's carbon log history
- * @param {object} simulation - User's simulation settings
+ * @param {object} simulation - User's active simulator targets
  * @returns {Promise<Array>} List of recommendations
  */
 async function getAIRecommendations(user, logs, simulation) {
-  // If API key is not present, use the heuristic engine
+  const targetLogs = logs || [];
+  const targetSim = simulation || { targetReductionPercentage: 0, plannedActions: [], estimatedSavings: 0 };
+  const targetUser = user || { name: 'Eco Explorer', streak: 0, badges: [] };
+
+  // Heuristic engine fallback
   if (!GEMINI_API_KEY || GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY_HERE') {
-    console.log("Gemini API key not configured. Using high-fidelity heuristic recommendations.");
-    return generateMockRecommendations(logs, simulation);
+    return generateMockRecommendations(targetLogs, targetSim);
   }
 
   try {
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     
-    // Calculate category breakdowns to give Gemini data
+    // Calculate category breakdowns
     const categoryTotals = { transport: 0, electricity: 0, food: 0, purchase: 0 };
-    logs.forEach(l => {
+    targetLogs.forEach(l => {
       if (categoryTotals[l.category] !== undefined) {
         categoryTotals[l.category] += l.co2Emissions;
       }
@@ -160,22 +175,36 @@ async function getAIRecommendations(user, logs, simulation) {
 
     const totalEmissions = Object.values(categoryTotals).reduce((a, b) => a + b, 0);
 
+    // AI Prompt Injection Defense - Sanitize user strings before appending to prompt
+    const sanitizePromptInput = (str, limit = 100) => {
+      if (typeof str !== 'string') return '';
+      // Strip brackets, backticks, quotes, and HTML tag delimiters
+      const clean = str.replace(/[<>`"'{}\[\]]/g, '').trim();
+      return clean.substring(0, limit);
+    };
+
+    const cleanUserName = sanitizePromptInput(targetUser.name, 30);
+    const cleanPlannedActions = (targetSim.plannedActions || [])
+      .map(a => sanitizePromptInput(a, 80))
+      .filter(Boolean)
+      .join(', ');
+
     const prompt = `
 You are an expert environmental consultant and AI carbon advisor for a premium app called CarbonAItracker.
 Your task is to analyze the user's recent carbon emissions footprint data and provide a list of exactly 4-5 highly personalized, practical, and actionable carbon reduction recommendations.
 
 User Context:
-- Name: ${user.name}
-- Active Streak: ${user.streak} days
-- Earned Badges: ${user.badges.join(', ') || 'None yet'}
+- Name: ${cleanUserName}
+- Active Streak: ${targetUser.streak} days
+- Earned Badges: ${targetUser.badges?.join(', ') || 'None yet'}
 - Recent Carbon Emissions breakdown:
   * Transportation: ${categoryTotals.transport.toFixed(1)} kg CO2
   * Electricity: ${categoryTotals.electricity.toFixed(1)} kg CO2
   * Food: ${categoryTotals.food.toFixed(1)} kg CO2
   * Purchases: ${categoryTotals.purchase.toFixed(1)} kg CO2
   * Total Carbon Footprint: ${totalEmissions.toFixed(1)} kg CO2
-- User's saved simulator target: Reduce by ${simulation.targetReductionPercentage}% (current target savings: ${simulation.estimatedSavings.toFixed(1)} kg CO2).
-- User's simulator planned actions: ${simulation.plannedActions.join(', ') || 'No actions selected yet'}.
+- User's saved simulator target: Reduce by ${targetSim.targetReductionPercentage}% (current target savings: ${targetSim.estimatedSavings?.toFixed(1) || 0} kg CO2).
+- User's simulator planned actions: ${cleanPlannedActions || 'No actions selected yet'}.
 
 Please format your response as a JSON object containing a "recommendations" array. Each item in the array must have the following keys:
 1. "id" (string): Unique identifier starting with "rec_ai_" followed by a short unique tag.
@@ -189,7 +218,6 @@ Return ONLY a valid JSON object. Do not include markdown code block syntax (like
 `;
 
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
@@ -207,11 +235,16 @@ Return ONLY a valid JSON object. Do not include markdown code block syntax (like
     throw new Error("Invalid output format from Gemini");
   } catch (error) {
     console.error("Error generating recommendations via Gemini API:", error);
-    // Graceful fallback to heuristics
-    return generateMockRecommendations(logs, simulation);
+    return generateMockRecommendations(targetLogs, targetSim);
   }
 }
 
 module.exports = {
-  getAIRecommendations
+  getAIRecommendations,
+  generateMockRecommendations,
+  sanitizePromptInput: (str, limit = 100) => {
+    if (typeof str !== 'string') return '';
+    const clean = str.replace(/[<>`"'{}\[\]]/g, '').trim();
+    return clean.substring(0, limit);
+  }
 };
